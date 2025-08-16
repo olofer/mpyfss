@@ -340,7 +340,7 @@ def estimate(
         assert Rzz.shape == (dim, dim)
         alpha_scale = np.trace(Rzz) / dim
         La = np.linalg.cholesky(Rzz + alpha * alpha_scale * np.eye(dim))
-        Mpy = input_to_state_map_(None, system_package["B"], args.p)
+        Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, Vt_ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
         assert S_.shape == (ny * p,)
         # print(U_.shape, S_.shape, Vt_.shape)
