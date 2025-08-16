@@ -7,6 +7,7 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
+# TODO: optional regularization for the VARX regression solve
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
 # TODO: QR based sequential aggregation, and even RSVD version
 # TODO: parallel version of covariance aggregation
@@ -454,58 +455,4 @@ if __name__ == "__main__":
     assert np.sum(sys_0["D"] ** 2) == 0
 
     # TODO: implement the balanced truncation version of the model reduction also
-
-"""
-[Apf, Bpf, Cpf, Dpf] = mfir(H, p, H0);
-Mpf = zeros(p * ny, p * (ny + nu));  % allocate input to state map
-Mpf(:, 1:(ny + nu)) = Bpf;
-cc = ny + nu;
-for ii = 2:p
-  % due to structure of Apf; the next line could be optimized by
-  % (block) shifting the previous columns in Mpf (to be done).
-  %Mpf(:, (cc + 1):(cc + ny + nu)) = Apf * Mpf(:, (cc - ny - nu + 1):cc);
-
-  % NOTE: there will be many zeros "pointlessly" assigned
-  % so the below line can still be improved
-  Mpf(1:((p - 1) * ny), (cc + 1):(cc + ny + nu)) = Mpf((ny + 1):end, (cc - ny - nu + 1):cc);
-  cc = cc + ny + nu;
-end
-assert(cc == p * (ny + nu));
-
-if cholla < 0
-  % Construct a weighted PCA-like transformation
-  P = (Mpf * (ZZt / ntot)) * Mpf';  % weighted "Gramian"
-  [Up, Sp, Vp] = svd(P);  % square decomp.
-  rep.sv = sqrt(diag(Sp));
-  T = Up(:, 1:n) * diag(rep.sv(1:n));
-  Ti = diag(1./rep.sv(1:n)) * Up(:, 1:n)';
-else
-  % alternative numerics; use with cholla = 0 for equivalence 
-  % to the standard code above; cholla > 0 allows "interpolation"
-  % between "standard" and "unweighted" (cholla very large)
-  L = chol(ZZt / ntot + cholla * eye(p * (nu + ny)), 'lower');
-  [Ul, Sl, Vl] = svd(Mpf * L, 'econ');  % reactangular decomp.
-  rep.sv = diag(Sl);
-  T = Ul(:, 1:n) * diag(rep.sv(1:n));
-  Ti = diag(1./rep.sv(1:n)) * Ul(:, 1:n)';
-end
-
-% Transform & truncate predictor to n states
-A = Ti * Apf * T;
-B = Ti * Bpf;
-C = Cpf * T;
-D = Dpf;
-
-% Step 3: pull out the system (A,B,C,D) from the 
-% reduced/stable predictor state space form.
-% Return data in output struct rep.
-rep.K = B(:, (nu+1):end);
-rep.D = D(:, 1:nu) * (rmsy / rmsu);
-rep.C = C;
-rep.B = (B(:, 1:nu) + rep.K * D(:, 1:nu)) * (rmsy / rmsu);
-rep.A = A + rep.K * rep.C;
-
-assert(size(rep.A, 1) == n);
-assert(size(rep.B, 1) == n);
-assert(size(rep.K, 1) == n);
-"""
+    print("*** DONE ***")
