@@ -106,11 +106,12 @@ def basic_mimo_example(
     B = np.zeros((2 * M, nu))
     C = np.zeros((ny, 2 * M))
 
+    xplonk = (L / 16) + (L / (nu + 1)) * np.arange(nu)
+    assert np.all(xplonk > 0) and np.all(xplonk < L)
+
     fu = list()
     for ii in range(nu):
-        xplonk = (L / 16) + (L / (nu + 1)) * ii
-        assert xplonk < L and xplonk > 0
-        fu.append(lambda x: np.exp(-1.0 * ((x - xplonk) ** 2) / ((0.01 * L) ** 2)))
+        fu.append(lambda x: np.exp(-1.0 * ((x - xplonk[ii]) ** 2) / ((0.01 * L) ** 2)))
 
     rho = 1
     xpick = np.arange(1, ny + 1) * rho * L / (ny + 1)
@@ -126,10 +127,10 @@ def basic_mimo_example(
                 -(r1 + r2 * ((mm + 1) * np.pi / L) ** 2),
             ],
         ]
-        Xm = lambda x: np.sin(x * np.pi * (mm + 1) / L)
+        Xm = lambda w: np.sin(w * np.pi * (mm + 1) / L)
         for ii in range(nu):
             integral_value, _ = quad(
-                lambda x: fu[ii](x) * Xm(x), 0.0, L, epsabs=qtol, epsrel=qtol
+                lambda z: fu[ii](z) * Xm(z), 0.0, L, epsabs=qtol, epsrel=qtol
             )
             B[kk : (kk + 2), ii] = [0.0, (2 / L) * integral_value]
 
@@ -223,7 +224,6 @@ def basic_mimo_example(
     dtsys = signal.dlti(sys["A"], sys["B"], sys["C"], sys["D"], dt=Ts)
 
     # TODO: make a sigma-plot to visualize the system frequency response match
-    # TODO: figure out why the Python results are a little bit different than the Matlab results ?!
 
     """
     figure;
