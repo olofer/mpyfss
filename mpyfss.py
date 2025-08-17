@@ -7,7 +7,6 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
-# TODO: optional regularization for the VARX regression solve
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
 # TODO: QR based sequential aggregation, and even RSVD version
 # TODO: parallel version of covariance aggregation
@@ -124,6 +123,7 @@ def mvarx_(
     scly: float = 1.0,
     sclu: float = 1.0,
     verbose: bool = False,
+    beta: float = 0.0,
     return_yz: bool = True,
     return_zz: bool = True,
 ) -> dict:
@@ -164,7 +164,11 @@ def mvarx_(
 
     # Estimate the Markov parameters as H = YZ * inv(ZZ).
     # Solve H * ZZ = YZ --> ZZ.T * H.T = YZ.T
-    Ht = np.linalg.solve(ZZ.T, YZ.T)
+    if beta > 0.0:
+        # Optional basic Tikhonov regularization
+        Ht = np.linalg.solve(ZZ.T + beta * np.eye(ZZ.shape[0]), YZ.T)
+    else:
+        Ht = np.linalg.solve(ZZ.T, YZ.T)
 
     return {
         "H": Ht.T,
@@ -173,6 +177,7 @@ def mvarx_(
         "dterm": dterm,
         "p": p,
         "Ntot": Ntot,
+        "beta": beta,
         "YZ": YZ if return_yz else None,
         "ZZ": ZZ if return_zz else None,
     }
@@ -295,6 +300,7 @@ def estimate(
     dterm: bool = False,
     reduction_method: str = "default",
     alpha: float = 1.0e-8,
+    beta: float = 0.0,
 ) -> dict:
     """
     This integrates VARX estimation (lag-order p) with subsequent model reduction.
@@ -310,6 +316,7 @@ def estimate(
         get_batch,
         p,
         dterm=dterm,
+        beta=beta,
         return_zz=not calc_gram,
         return_yz=False,
     )
