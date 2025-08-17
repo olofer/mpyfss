@@ -305,11 +305,11 @@ def estimate(
     """
     This integrates VARX estimation (lag-order p) with subsequent model reduction.
     The final returned LTI state-space system {A,B,K,C,D,Q,R} has n states.
-    The "reduction_method" parameter can be "balanced" or "default".
+    The "reduction_method" parameter can be "weighted" (default) or "unweighted".
     """
     assert batches >= 1, "Must provide at least 1 batch of data"
 
-    calc_gram = reduction_method.lower() == "balanced"
+    need_zz = reduction_method.lower() == "weighted"
 
     markov_coefs = mvarx_(
         batches,
@@ -317,7 +317,7 @@ def estimate(
         p,
         dterm=dterm,
         beta=beta,
-        return_zz=not calc_gram,
+        return_zz=need_zz,
         return_yz=False,
     )
 
@@ -330,21 +330,15 @@ def estimate(
             markov_coefs["H"][:, : (p * (ny + nu))],
             p,
             H0=markov_coefs["H"][:, (p * (ny + nu)) :],
-            return_p=calc_gram,
+            return_p=False,
         )
     else:
         nu = (markov_coefs["H"].shape[1] // p) - ny
         assert markov_coefs["H"].shape[1] == (ny + nu) * p
-        system_package = mfir_(markov_coefs["H"], p, H0=None, return_p=calc_gram)
+        system_package = mfir_(markov_coefs["H"], p, H0=None, return_p=False)
 
-    if reduction_method.lower() == "balanced":
-        # P needed here! But P is also computable from Mpy..
-        # TODO: create the balanced realization for {P, Q=I}; and return the n-truncated matrices T, Ti
-        raise NotImplementedError
-
-    elif reduction_method.lower() == "unweighted":
-        dim = p * (ny + nu)
-        Rzz = markov_coefs["ZZ"] if not dterm else markov_coefs["ZZ"][:dim, :dim]
+    if reduction_method.lower() == "unweighted":
+        # Should be equivalent to balanced truncation of the mfir_ system
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, _ = np.linalg.svd(Mpy, full_matrices=False, compute_uv=True)
         T = U_[:, :n] @ np.diag(S_[:n])
@@ -357,7 +351,7 @@ def estimate(
         alpha_scale = np.trace(Rzz) / dim
         La = np.linalg.cholesky(Rzz + alpha * alpha_scale * np.eye(dim))
         Mpy = input_to_state_map_(None, system_package["B"], p)
-        U_, S_, Vt_ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
+        U_, S_, _ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
         assert S_.shape == (ny * p,)
         T = U_[:, :n] @ np.diag(S_[:n])
         Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
