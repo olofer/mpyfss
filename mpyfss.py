@@ -298,7 +298,7 @@ def estimate(
     p: int,
     n: int,
     dterm: bool = False,
-    reduction_method: str = "default",
+    reduction_method: str = "weighted",
     alpha: float = 1.0e-8,
     beta: float = 0.0,
 ) -> dict:
@@ -338,11 +338,19 @@ def estimate(
         system_package = mfir_(markov_coefs["H"], p, H0=None, return_p=calc_gram)
 
     if reduction_method.lower() == "balanced":
-        # P needed here!
+        # P needed here! But P is also computable from Mpy..
         # TODO: create the balanced realization for {P, Q=I}; and return the n-truncated matrices T, Ti
         raise NotImplementedError
 
-    elif reduction_method.lower() == "default":
+    elif reduction_method.lower() == "unweighted":
+        dim = p * (ny + nu)
+        Rzz = markov_coefs["ZZ"] if not dterm else markov_coefs["ZZ"][:dim, :dim]
+        Mpy = input_to_state_map_(None, system_package["B"], p)
+        U_, S_, _ = np.linalg.svd(Mpy, full_matrices=False, compute_uv=True)
+        T = U_[:, :n] @ np.diag(S_[:n])
+        Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
+
+    elif reduction_method.lower() == "weighted":
         dim = p * (ny + nu)
         Rzz = markov_coefs["ZZ"] if not dterm else markov_coefs["ZZ"][:dim, :dim]
         assert Rzz.shape == (dim, dim)
@@ -351,7 +359,6 @@ def estimate(
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, Vt_ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
         assert S_.shape == (ny * p,)
-        # print(U_.shape, S_.shape, Vt_.shape)
         T = U_[:, :n] @ np.diag(S_[:n])
         Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
 
@@ -437,13 +444,14 @@ if __name__ == "__main__":
     print("H1:", varx_1["H"].shape, np.mean(varx_1["H"]), np.mean(np.abs(varx_1["H"])))
 
     # Quick check of mfir_ & its associated input-2-state function:
-    mfir_0A = mfir_(varx_0["H"], args.p, H0=None, return_a=True)
+    mfir_0A = mfir_(varx_0["H"], args.p, H0=None, return_a=True, return_p=True)
     assert np.sum(mfir_0A["D"] ** 2) == 0
     map_A = input_to_state_map_(mfir_0A["A"], mfir_0A["B"], args.p)
     mfir_0B = mfir_(varx_0["H"], args.p, H0=None, return_a=False)
     assert mfir_0B["A"] is None
     map_B = input_to_state_map_(mfir_0B["A"], mfir_0B["B"], args.p)
     assert np.allclose(map_A, map_B, rtol=1.0e-14, atol=1.0e-14)
+    assert np.allclose(map_A @ map_A.T, mfir_0A["P"])
 
     # Explicitly verify the correctness of the mfir_ state space representation
     D_pert = np.random.randn(mfir_0A["C"].shape[0], mfir_0A["B"].shape[1])
@@ -461,5 +469,4 @@ if __name__ == "__main__":
 
     assert np.sum(sys_0["D"] ** 2) == 0
 
-    # TODO: implement the balanced truncation version of the model reduction also
     print("*** DONE ***")
