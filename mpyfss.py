@@ -306,6 +306,8 @@ def estimate(
     This integrates VARX estimation (lag-order p) with subsequent model reduction.
     The final returned LTI state-space system {A,B,K,C,D,Q,R} has n states.
     The "reduction_method" parameter can be "weighted" (default) or "unweighted".
+    Regularization parameter alpha applies to the "weighted" model reduction step.
+    Regularization parameter beta applies to the VARX regression step.
     """
     assert batches >= 1, "Must provide at least 1 batch of data"
 
@@ -330,12 +332,15 @@ def estimate(
             markov_coefs["H"][:, : (p * (ny + nu))],
             p,
             H0=markov_coefs["H"][:, (p * (ny + nu)) :],
+            return_a=False,
             return_p=False,
         )
     else:
         nu = (markov_coefs["H"].shape[1] // p) - ny
         assert markov_coefs["H"].shape[1] == (ny + nu) * p
-        system_package = mfir_(markov_coefs["H"], p, H0=None, return_p=False)
+        system_package = mfir_(
+            markov_coefs["H"], p, H0=None, return_a=False, return_p=False
+        )
 
     if reduction_method.lower() == "unweighted":
         # Should be equivalent to balanced truncation of the mfir_ system
@@ -357,7 +362,8 @@ def estimate(
         Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
 
     # Transform & truncate predictor to n states
-    Ak = Ti @ system_package["A"] @ T
+    Ak = Ti @ np.vstack([T[ny:, :], np.zeros((ny, n))])
+    # Ak = Ti @ system_package["A"] @ T
     Bk = Ti @ system_package["B"]
     Ck = system_package["C"] @ T
     Dk = system_package["D"]
