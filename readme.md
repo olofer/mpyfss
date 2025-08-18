@@ -35,6 +35,7 @@ See `example.py` for complete examples. The below demonstration also requires `m
 
 ```
 python3 example.py
+python3 example.py --which mimo-open-loop
 ```
 
 ## References

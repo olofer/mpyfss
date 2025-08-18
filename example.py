@@ -1,5 +1,8 @@
 """
 Collection of examples using the MPYFSS.ESTIMATE(.) function.
+
+EXAMPLE: python3 example.py --which mimo-open-loop
+
 """
 
 import numpy as np
@@ -9,6 +12,48 @@ import matplotlib.pyplot as plt
 import argparse
 
 import mpyfss
+
+
+def sigma_plot(npts: int = 512, system_list: list = None, system_label: list = None):
+    """
+    Create a sigma plot of one or more MIMO discrete-time LTI systems.
+    """
+    w = np.logspace(-2, np.log10(np.pi), npts)  # correct base ?!
+
+    colors = ["black", "blue", "red", "green"]
+    if not system_label is None:
+        assert len(system_label) == len(
+            system_list
+        ), "Number of labels should match number of systems"
+
+    for k, S in enumerate(system_list):
+        A, B, C, D = S["A"], S["B"], S["C"], S["D"]
+        I = np.eye(A.shape[0])
+        H = np.zeros((C.shape[0], B.shape[1], npts), dtype=complex)
+        for i, freq in enumerate(w):
+            z = np.exp(1j * freq)
+            H[:, :, i] = C @ np.linalg.solve(z * I - A, B) + D
+
+        singular_values = np.column_stack(
+            [np.linalg.svd(H[:, :, i], compute_uv=False) for i in range(npts)]
+        )
+
+        for i in range(singular_values.shape[0]):
+            plt.semilogx(
+                w / np.pi,
+                20 * np.log10(singular_values[i, :]),
+                linewidth=2.0,
+                color=colors[k % len(colors)],
+                label=None if i > 0 or system_label is None else system_label[k],
+                alpha=0.67,
+            )
+
+    plt.xlabel("Normalized Frequency (x$\pi$ rad/sample)")
+    plt.ylabel("Magnitude (dB)")
+    plt.title("Sigma Plot")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
 
 
 def basic_siso_example():
@@ -221,14 +266,17 @@ def basic_mimo_example(
     plt.tight_layout()
     plt.show()
 
-    dtsys = signal.dlti(sys["A"], sys["B"], sys["C"], sys["D"], dt=Ts)
-
-    # TODO: make a sigma-plot to visualize the system frequency response match
-
-    """
-    figure;
-    sigma(sysdt, 'b-', syses, 'r-', syses2, 'g-');
-    """
+    scale_correction = stdu / stdy
+    sigma_plot(
+        system_list=[
+            {"A": Ad, "B": scale_correction * Bd, "C": Cd, "D": scale_correction * Dd},
+            sys,
+        ],
+        system_label=[
+            "True (%i states)" % (Ad.shape[0]),
+            "Estimated (%i states)" % (sys["A"].shape[0]),
+        ],
+    )
 
 
 if __name__ == "__main__":
