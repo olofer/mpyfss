@@ -15,7 +15,7 @@ The only external dependence is `numpy`.
 For general usage, just `import mpyfss` and define a `get_batch(.)` function to get going (it takes a single index argument and is responsible to return a tuple of I/O signal data `numpy` arrays). This *might* look as follows.
 
 ```
-import mypyfss
+import mpyfss
 
 ...
 
