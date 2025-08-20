@@ -7,11 +7,14 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
-# TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
-# TODO: QR based sequential aggregation, and even RSVD version
-# TODO: parallel version of covariance aggregation
+# TODO: transposed featurization option
+# TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
+# TODO: QR based VARX solver option --> returning square-root of ZZ, but still YZ the same way?
+# TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered)
 # TODO: implement elementwise signal scaling sy, su? Or this should be the callers responsibility?
 # TODO: Can I make this work with CUPY or NUMPY equally?
+# TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
+# TODO: RSVD variant for very large systems
 
 import numpy as np
 
@@ -310,6 +313,7 @@ def estimate(
     Regularization parameter beta applies to the VARX regression step.
     """
     assert batches >= 1, "Must provide at least 1 batch of data"
+    assert alpha >= 0.0, "alpha >= 0 required"
 
     need_zz = reduction_method.lower() == "weighted"
 
@@ -360,6 +364,9 @@ def estimate(
         assert S_.shape == (ny * p,)
         T = U_[:, :n] @ np.diag(S_[:n])
         Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
+
+    else:
+        assert False, "Unrecognized reduction_method"
 
     # Transform & truncate predictor to n states
     Ak = Ti @ np.vstack([T[ny:, :], np.zeros((ny, n))])
