@@ -7,11 +7,9 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
-# TODO: transposed featurization option
 # TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
 # TODO: QR based VARX solver option --> returning square-root of ZZ, but still YZ the same way?
 # TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered) BYO-accumulator callback!
-# TODO: implement elementwise signal scaling sy, su? Or this should be the callers responsibility?
 # TODO: Can I make this work with CUPY or NUMPY equally?
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
 # TODO: RSVD variant for very large systems
@@ -41,9 +39,7 @@ def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
         Zp = np.tile(np.nan, (nzp + nu, Neff))
         for k in range(k1, k2):
             kk = k - k1
-            assert kk >= 0 and kk <= Neff - 1
             lags = np.arange(k - 1, k - p - 1, -1)
-            assert len(lags) == p
             Y[:, kk] = y[:, k]
             past = Z[:, lags].T.flatten()
             direct = u[:, k]
@@ -52,11 +48,48 @@ def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
         Zp = np.tile(np.nan, (nzp, Neff))
         for k in range(k1, k2):
             kk = k - k1
-            assert kk >= 0 and kk <= Neff - 1
             lags = np.arange(k - 1, k - p - 1, -1)
-            assert len(lags) == p
             Y[:, kk] = y[:, k]
             Zp[:, kk] = Z[:, lags].T.flatten()
+
+    assert np.all(np.isfinite(Y))
+    assert np.all(np.isfinite(Zp))
+
+    return Y, Zp
+
+
+def dvarxdata_transposed_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
+    """
+    Create regressor for one contiguous batch of time-series I/O data.
+    It is assumed that the time-dimension is across rows (columns are signal channels).
+    """
+    N, ny = y.shape
+    nu = u.shape[1]
+    assert u.shape[0] == N
+    k1 = p
+    k2 = N
+    Neff = k2 - k1
+    assert Neff >= 1, "Lag too large for batch time-series length"
+    nz = ny + nu
+    Z = np.hstack((u, y))
+    assert Z.shape[0] == N and Z.shape[1] == nz
+    Y = np.tile(np.nan, (Neff, ny))
+    nzp = nz * p
+
+    if dterm:
+        Zp = np.tile(np.nan, (Neff, nzp + nu))
+        for k in range(k1, k2):
+            kk = k - k1
+            lags = np.arange(k - 1, k - p - 1, -1)
+            Y[kk, :] = y[k, :]
+            Zp[kk, :] = np.concatenate([Z[lags, :].flatten(), u[k, :]])
+    else:
+        Zp = np.tile(np.nan, (Neff, nzp))
+        for k in range(k1, k2):
+            kk = k - k1
+            lags = np.arange(k - 1, k - p - 1, -1)
+            Y[kk, :] = y[k, :]
+            Zp[kk, :] = Z[lags, :].flatten()
 
     assert np.all(np.isfinite(Y))
     assert np.all(np.isfinite(Zp))
@@ -436,6 +469,14 @@ if __name__ == "__main__":
     print("batch sizes:", rms["size"])
     print("overall RMS(u):", rms["total_rmsu"])
     print("overall RMS(y):", rms["total_rmsy"])
+
+    # Verify featurizer variants are exactly consistent
+    for b in range(args.B):
+        ub_, yb_ = GET_BATCH(b)
+        for dterm_ in [False, True]:
+            Zb1, Yb1 = dvarxdata_(yb_, ub_, args.p, dterm_)
+            Zb2, Yb2 = dvarxdata_transposed_(yb_.T, ub_.T, args.p, dterm_)
+            assert np.all(Zb1 == Zb2.T) and np.all(Yb1 == Yb2.T)
 
     # Estimate VARX coefficients .. expect all coeffs to be ~ zero
     varx_0 = mvarx_(args.B, GET_BATCH, args.p, dterm=False, verbose=True)
