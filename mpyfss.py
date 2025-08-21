@@ -144,7 +144,7 @@ def get_stats(batches: int, get_batch: callable) -> dict:
     }
 
 
-def mvarx_(
+def default_sequential_accumulator_(
     batches: int,
     get_batch: callable,
     p: int,
@@ -152,16 +152,12 @@ def mvarx_(
     scly: float = 1.0,
     sclu: float = 1.0,
     verbose: bool = False,
-    beta: float = 0.0,
-    return_yz: bool = True,
-    return_zz: bool = True,
-) -> dict:
+):
     """
-    Estimate the VARX block coefficients up to lag-order p.
-    Direct term is optional (dterm=True, default is False).
-    This is a squared-form sequential "reference" calculation.
+    TODO: also make this handle transposed case
+    TODO: restucture this with an internal "merger" function instead
+    TODO: use dvarxdata_transposed_ when told to (set a callable dep on switch)
     """
-    assert batches >= 1, "Must provide at least 1 batch of data"
 
     u, y = get_batch(0)
     nu, ny = u.shape[0], y.shape[0]
@@ -187,6 +183,37 @@ def mvarx_(
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
+
+    return ZZ, YZ, Ntot
+
+
+def mvarx_(
+    batches: int,
+    get_batch: callable,
+    p: int,
+    dterm: bool = False,
+    scly: float = 1.0,
+    sclu: float = 1.0,
+    verbose: bool = False,
+    beta: float = 0.0,
+    return_yz: bool = True,
+    return_zz: bool = True,
+    custom_accumulator: callable = None,
+) -> dict:
+    """
+    Estimate the VARX block coefficients up to lag-order p.
+    Direct term is optional (dterm=True, default is False).
+    TODO: option to use transposed-data accumulation
+    TODO: option to solve final equation with Cholesky instead (might bring in SCIPY though..)
+    """
+    assert batches >= 1, "Must provide at least 1 batch of data"
+
+    if custom_accumulator is None:
+        ZZ, YZ, Ntot = default_sequential_accumulator_(
+            batches, get_batch, p, dterm=dterm, scly=scly, sclu=sclu, verbose=verbose
+        )
+    else:
+        raise NotImplementedError
 
     if verbose:
         print("Total regressors:", Ntot)
