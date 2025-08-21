@@ -10,7 +10,7 @@ USAGE: just import this file & call mpyfss.estimate(.)
 # TODO: transposed featurization option
 # TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
 # TODO: QR based VARX solver option --> returning square-root of ZZ, but still YZ the same way?
-# TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered)
+# TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered) BYO-accumulator callback!
 # TODO: implement elementwise signal scaling sy, su? Or this should be the callers responsibility?
 # TODO: Can I make this work with CUPY or NUMPY equally?
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
@@ -19,17 +19,10 @@ USAGE: just import this file & call mpyfss.estimate(.)
 import numpy as np
 
 
-def dvarxdata_(
-    y: np.ndarray,
-    u: np.ndarray,
-    p: int,
-    dterm: bool = False,
-    scly: float = 1.0,
-    sclu: float = 1.0,
-):
+def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
     """
     Create regressor for one contiguous batch of time-series I/O data.
-    Optional signal scaling.
+    It is assumed that the time-dimension is across columns (rows are signal channels).
     """
     ny, N = y.shape
     nu = u.shape[0]
@@ -39,7 +32,7 @@ def dvarxdata_(
     Neff = k2 - k1
     assert Neff >= 1, "Lag too large for batch time-series length"
     nz = ny + nu
-    Z = np.vstack((u * sclu, y * scly))
+    Z = np.vstack((u, y))
     assert Z.shape[0] == nz and Z.shape[1] == N
     Y = np.tile(np.nan, (ny, Neff))
     nzp = nz * p
@@ -51,9 +44,9 @@ def dvarxdata_(
             assert kk >= 0 and kk <= Neff - 1
             lags = np.arange(k - 1, k - p - 1, -1)
             assert len(lags) == p
-            Y[:, kk] = y[:, k] * scly
+            Y[:, kk] = y[:, k]
             past = Z[:, lags].T.flatten()
-            direct = u[:, k] * sclu
+            direct = u[:, k]
             Zp[:, kk] = np.concatenate([past, direct])
     else:
         Zp = np.tile(np.nan, (nzp, Neff))
@@ -62,7 +55,7 @@ def dvarxdata_(
             assert kk >= 0 and kk <= Neff - 1
             lags = np.arange(k - 1, k - p - 1, -1)
             assert len(lags) == p
-            Y[:, kk] = y[:, k] * scly
+            Y[:, kk] = y[:, k]
             Zp[:, kk] = Z[:, lags].T.flatten()
 
     assert np.all(np.isfinite(Y))
@@ -140,7 +133,7 @@ def mvarx_(
     u, y = get_batch(0)
     nu, ny = u.shape[0], y.shape[0]
     assert u.shape[1] == y.shape[1]
-    Yb, Zb = dvarxdata_(y, u, p, dterm=dterm, scly=scly, sclu=sclu)
+    Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
     Ntot = Yb.shape[1]
     YZ = (1.0 / Ntot) * (Yb @ Zb.T)
     ZZ = (1.0 / Ntot) * (Zb @ Zb.T)
@@ -152,11 +145,12 @@ def mvarx_(
         u, y = get_batch(b)
         assert ny == y.shape[0] and nu == u.shape[0]
         assert u.shape[1] == y.shape[1]
-        Yb, Zb = dvarxdata_(y, u, p, dterm=dterm, scly=scly, sclu=sclu)
+        Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
         Nb = Yb.shape[1]
+        a_, b_ = Ntot / (Ntot + Nb), Nb / (Ntot + Nb)
+        YZ = a_ * YZ + b_ * (Yb @ Zb.T) / Nb
+        ZZ = a_ * ZZ + b_ * (Zb @ Zb.T) / Nb
         Ntot += Nb
-        YZ = ((Ntot - Nb) * YZ + (Yb @ Zb.T)) / Ntot
-        ZZ = ((Ntot - Nb) * ZZ + (Zb @ Zb.T)) / Ntot
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
