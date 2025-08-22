@@ -7,8 +7,9 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
+# TODO: the main estimate function should have the option to pass in a list of system orders n
 # TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
-# TODO: QR based VARX solver option --> returning square-root of ZZ, but still YZ the same way?
+# TODO: QR based VARX solver option --> using a QR merging operation
 # TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered) BYO-accumulator callback!
 # TODO: Can I make this work with CUPY or NUMPY equally?
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
@@ -144,47 +145,46 @@ def get_stats(batches: int, get_batch: callable) -> dict:
     }
 
 
+# TODO: it might be more memory efficient to have this mutate one_ instead of returning a new tuple
+def merge_covariance_(one_, two_):
+    """
+    Each argument is a tuple (ZZ, YZ, nsamples).
+    """
+    if one_ is None:
+        return two_
+    n1, n2 = one_[2], two_[2]
+    a_, b_ = n1 / (n1 + n2), n2 / (n1 + n2)
+    return a_ * one_[0] + b_ * two_[0], a_ * one_[1] + b_ * two_[1], n1 + n2
+
+
 def default_sequential_accumulator_(
     batches: int,
     get_batch: callable,
     p: int,
     dterm: bool = False,
+    transposed_batch: bool = False,
     scly: float = 1.0,
     sclu: float = 1.0,
     verbose: bool = False,
 ):
-    """
-    TODO: also make this handle transposed case
-    TODO: restucture this with an internal "merger" function instead
-    TODO: use dvarxdata_transposed_ when told to (set a callable dep on switch)
-    """
+    STATS = None
 
-    u, y = get_batch(0)
-    nu, ny = u.shape[0], y.shape[0]
-    assert u.shape[1] == y.shape[1]
-    Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
-    Ntot = Yb.shape[1]
-    YZ = (1.0 / Ntot) * (Yb @ Zb.T)
-    ZZ = (1.0 / Ntot) * (Zb @ Zb.T)
-
-    if verbose:
-        print("shapes:", 0, Yb.shape, Zb.shape)
-
-    for b in range(1, batches):
+    for b in range(batches):
         u, y = get_batch(b)
-        assert ny == y.shape[0] and nu == u.shape[0]
-        assert u.shape[1] == y.shape[1]
-        Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
-        Nb = Yb.shape[1]
-        a_, b_ = Ntot / (Ntot + Nb), Nb / (Ntot + Nb)
-        YZ = a_ * YZ + b_ * (Yb @ Zb.T) / Nb
-        ZZ = a_ * ZZ + b_ * (Zb @ Zb.T) / Nb
-        Ntot += Nb
+
+        if transposed_batch:
+            Yb, Zb = dvarxdata_transposed_(scly * y, sclu * u, p, dterm=dterm)
+            Nb = Yb.shape[0]
+            STATS = merge_covariance_(STATS, ((Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, Nb))
+        else:
+            Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
+            Nb = Yb.shape[1]
+            STATS = merge_covariance_(STATS, ((Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, Nb))
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
 
-    return ZZ, YZ, Ntot
+    return STATS
 
 
 def mvarx_(
@@ -192,6 +192,7 @@ def mvarx_(
     get_batch: callable,
     p: int,
     dterm: bool = False,
+    transposed_batch: bool = False,
     scly: float = 1.0,
     sclu: float = 1.0,
     verbose: bool = False,
@@ -203,14 +204,19 @@ def mvarx_(
     """
     Estimate the VARX block coefficients up to lag-order p.
     Direct term is optional (dterm=True, default is False).
-    TODO: option to use transposed-data accumulation
-    TODO: option to solve final equation with Cholesky instead (might bring in SCIPY though..)
     """
     assert batches >= 1, "Must provide at least 1 batch of data"
 
     if custom_accumulator is None:
         ZZ, YZ, Ntot = default_sequential_accumulator_(
-            batches, get_batch, p, dterm=dterm, scly=scly, sclu=sclu, verbose=verbose
+            batches,
+            get_batch,
+            p,
+            dterm=dterm,
+            transposed_batch=transposed_batch,
+            scly=scly,
+            sclu=sclu,
+            verbose=verbose,
         )
     else:
         raise NotImplementedError
@@ -355,6 +361,7 @@ def estimate(
     p: int,
     n: int,
     dterm: bool = False,
+    transposed_batch: bool = False,
     reduction_method: str = "weighted",
     alpha: float = 1.0e-8,
     beta: float = 0.0,
@@ -376,6 +383,7 @@ def estimate(
         get_batch,
         p,
         dterm=dterm,
+        transposed_batch=transposed_batch,
         beta=beta,
         return_zz=need_zz,
         return_yz=False,
@@ -537,5 +545,20 @@ if __name__ == "__main__":
     sys_1 = estimate(args.B, GET_BATCH, args.p, args.n, dterm=True)
 
     assert np.sum(sys_0["D"] ** 2) == 0
+
+    # Check the transposed batch option
+    def GET_TRANSPOSED_BATCH(index: int):
+        return DATA[index][0].T, DATA[index][1].T
+
+    sys_0_t = estimate(
+        args.B, GET_TRANSPOSED_BATCH, args.p, args.n, dterm=False, transposed_batch=True
+    )
+    sys_1_t = estimate(
+        args.B, GET_TRANSPOSED_BATCH, args.p, args.n, dterm=True, transposed_batch=True
+    )
+
+    for m in ["A", "B", "C", "D"]:
+        assert np.allclose(sys_0[m], sys_0_t[m])
+        assert np.allclose(sys_1[m], sys_1_t[m])
 
     print("*** DONE ***")
