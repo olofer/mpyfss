@@ -7,14 +7,6 @@ USAGE: just import this file & call mpyfss.estimate(.)
 
 """
 
-# TODO: the main estimate function should have the option to pass in a list of system orders n
-# TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
-# TODO: QR based VARX solver option --> using a QR merging operation
-# TODO: parallel version of covariance aggregation (multiprocessing::imap_unordered) BYO-accumulator callback!
-# TODO: Can I make this work with CUPY or NUMPY equally?
-# TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
-# TODO: RSVD variant for very large systems
-
 import numpy as np
 
 
@@ -145,16 +137,23 @@ def get_stats(batches: int, get_batch: callable) -> dict:
     }
 
 
-# TODO: it might be more memory efficient to have this mutate one_ instead of returning a new tuple
-def merge_covariance_(one_, two_):
+def merge_covariance_(acc: dict, block: tuple):
     """
-    Each argument is a tuple (ZZ, YZ, nsamples).
+    Each "block" argument is a tuple (ZZ, YZ, nsamples).
+    Modifies the elements of "acc" in-place, unless it is the initial assignment.
     """
-    if one_ is None:
-        return two_
-    n1, n2 = one_[2], two_[2]
-    a_, b_ = n1 / (n1 + n2), n2 / (n1 + n2)
-    return a_ * one_[0] + b_ * two_[0], a_ * one_[1] + b_ * two_[1], n1 + n2
+    if acc["N"] == 0:
+        acc["ZZ"] = np.copy(block[0])
+        acc["YZ"] = np.copy(block[1])
+        acc["N"] = block[2]
+    else:
+        n1, n2 = acc["N"], block[2]
+        a_, b_ = n1 / (n1 + n2), n2 / (n1 + n2)
+        acc["ZZ"] *= a_
+        acc["ZZ"] += b_ * block[0]
+        acc["YZ"] *= a_
+        acc["YZ"] += b_ * block[1]
+        acc["N"] += n2
 
 
 def default_sequential_accumulator_(
@@ -167,24 +166,34 @@ def default_sequential_accumulator_(
     sclu: float = 1.0,
     verbose: bool = False,
 ):
-    STATS = None
+    STATS = {"ZZ": None, "YZ": None, "N": int(0)}
 
     for b in range(batches):
         u, y = get_batch(b)
 
         if transposed_batch:
-            Yb, Zb = dvarxdata_transposed_(scly * y, sclu * u, p, dterm=dterm)
+            Yb, Zb = dvarxdata_transposed_(
+                y if scly == 1.0 else scly * y,
+                u if sclu == 1.0 else sclu * u,
+                p,
+                dterm=dterm,
+            )
             Nb = Yb.shape[0]
-            STATS = merge_covariance_(STATS, ((Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, Nb))
+            merge_covariance_(STATS, ((Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, Nb))
         else:
-            Yb, Zb = dvarxdata_(scly * y, sclu * u, p, dterm=dterm)
+            Yb, Zb = dvarxdata_(
+                y if scly == 1.0 else scly * y,
+                u if sclu == 1.0 else sclu * u,
+                p,
+                dterm=dterm,
+            )
             Nb = Yb.shape[1]
-            STATS = merge_covariance_(STATS, ((Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, Nb))
+            merge_covariance_(STATS, ((Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, Nb))
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
 
-    return STATS
+    return STATS["ZZ"], STATS["YZ"], STATS["N"]
 
 
 def mvarx_(
@@ -219,7 +228,16 @@ def mvarx_(
             verbose=verbose,
         )
     else:
-        raise NotImplementedError
+        ZZ, YZ, Ntot = custom_accumulator(
+            batches,
+            get_batch,
+            p,
+            dterm=dterm,
+            transposed_batch=transposed_batch,
+            scly=scly,
+            sclu=sclu,
+            verbose=verbose,
+        )
 
     if verbose:
         print("Total regressors:", Ntot)
@@ -562,3 +580,11 @@ if __name__ == "__main__":
         assert np.allclose(sys_1[m], sys_1_t[m])
 
     print("*** DONE ***")
+
+# TODO: implement a new example that uses multiprocessing for parallel aggregation
+# TODO: the main estimate function should have the option to pass in a list of system orders n
+# TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
+# TODO: QR based VARX solver option --> using a QR merging operation
+# TODO: Can I make this work with CUPY or NUMPY equally?
+# TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
+# TODO: RSVD variant for very large systems
