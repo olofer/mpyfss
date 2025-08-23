@@ -383,6 +383,7 @@ def estimate(
     reduction_method: str = "weighted",
     alpha: float = 1.0e-8,
     beta: float = 0.0,
+    custom_accumulator: callable = None,
 ) -> dict:
     """
     This integrates VARX estimation (lag-order p) with subsequent model reduction.
@@ -405,6 +406,7 @@ def estimate(
         beta=beta,
         return_zz=need_zz,
         return_yz=False,
+        custom_accumulator=custom_accumulator,
     )
 
     ny = markov_coefs["H"].shape[0]
