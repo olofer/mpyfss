@@ -17,9 +17,13 @@ NT: int = 5000
 
 
 def produce_batch(idx: int):
-    # Use idx as a seed value for a local RNG, then generate input data from the RNG and also for output noise..
-    U = np.zeros((NT, 2))
-    Y = np.zeros((NT, 2))
+    """
+    This is the "data loader" with the responsibility to return I/O batch data.
+    It can generate a simulation like in this example, or it could load a file from disk, or arrays from memory.
+    """
+    rng = np.random.default_rng(seed=idx)
+    U = rng.standard_normal((NT, 2))
+    Y = rng.standard_normal((NT, 2))
     return U, Y
 
 
@@ -28,6 +32,8 @@ def get_batch_covariance(idx: int, params: dict):
     Runs on a worker process in parallel with other jobs.
     """
     U, Y = produce_batch(idx)
+    assert U.shape[0] == Y.shape[0], "Batch producer gave inconsistent array lengths"
+    assert params["transposed"], "standard argument inconsistent with batch producer"
     Yi, Zi = mpyfss.dvarxdata_transposed_(Y, U, params["p"], params["dterm"])
     Ni = Yi.shape[0]
     return {"ZZ": (Zi.T @ Zi) / Ni, "YZ": (Yi.T @ Zi) / Ni, "N": Ni}
@@ -47,7 +53,7 @@ def merge_result(summary: dict, item: dict):
         summary["YZ"] += b_ * item["YZ"]
         summary["N"] += item["N"]
     else:
-        print("1st!")
+        # print("1st!")
         summary["ZZ"] = item["ZZ"]
         summary["YZ"] = item["YZ"]
         summary["N"] = item["N"]
@@ -61,7 +67,9 @@ def custom_accumulator_function(
     """
     summary = {"ZZ": None, "YZ": None, "N": int(0)}
 
-    job_list = [k for k in range(num_batches)]
+    job_list = [
+        k for k in range(num_batches)
+    ]  # note that it is not necessary to realize the range first
 
     with multiprocessing.Pool(processes=workers) as pool:
         worker_function = functools.partial(get_batch_covariance, params=standard_args)
@@ -76,35 +84,32 @@ def custom_accumulator_function(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batches", type=int, default=100)
+    parser.add_argument("--batches", type=int, default=50)
     parser.add_argument("--p", type=int, default=12)
     parser.add_argument("--nx", type=int, default=5)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--chunksize", type=int, default=10)
     args = parser.parse_args()
 
-    standard_params = {"p": 10, "dterm": False}
+    # standard_params = {"p": 10, "dterm": False}
 
     shippable_custom_accumulator = functools.partial(
         custom_accumulator_function, workers=args.workers, chunksize=args.chunksize
     )
+
     # ZZ, YZ, N = custom_accumulator_function(args.batches, standard_params, args.workers, args.chunksize)
-
-    ZZ, YZ, N = shippable_custom_accumulator(args.batches, standard_params)
-
-    print(ZZ.shape, YZ.shape)
-    print("total N:", N)
-
-    assert np.all(np.isfinite(ZZ))
-    assert np.all(np.isfinite(YZ))
+    # ZZ, YZ, N = shippable_custom_accumulator(args.batches, standard_params)
+    # print(ZZ.shape, YZ.shape)
+    # print("total N:", N)
+    # assert np.all(np.isfinite(ZZ))
+    # assert np.all(np.isfinite(YZ))
 
     SYS = mpyfss.estimate(
         args.batches,
-        produce_batch,
+        None,
         args.p,
         args.nx,
         False,
-        beta=1.0e-6,
         transposed_batch=True,
         custom_accumulator=shippable_custom_accumulator,
     )
