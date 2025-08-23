@@ -228,16 +228,19 @@ def mvarx_(
             verbose=verbose,
         )
     else:
-        ZZ, YZ, Ntot = custom_accumulator(
-            batches,
-            get_batch,
-            p,
-            dterm=dterm,
-            transposed_batch=transposed_batch,
-            scly=scly,
-            sclu=sclu,
-            verbose=verbose,
-        )
+        if not get_batch is None:
+            print(
+                "WARNING: custom_accumulator is given but get_batch is not None -- it will be ignored"
+            )
+        custom_args = {
+            "p": p,
+            "dterm": dterm,
+            "transposed": transposed_batch,
+            "scly": scly,
+            "sclu": sclu,
+            "verbose": verbose,
+        }
+        ZZ, YZ, Ntot = custom_accumulator(batches, custom_args)
 
     if verbose:
         print("Total regressors:", Ntot)
@@ -440,6 +443,9 @@ def estimate(
         Rzz = markov_coefs["ZZ"] if not dterm else markov_coefs["ZZ"][:dim, :dim]
         assert Rzz.shape == (dim, dim)
         alpha_scale = np.trace(Rzz) / dim
+        if alpha_scale == 0.0:
+            alpha_scale = 1.0
+            print("WARNING: all-zero data?")
         La = np.linalg.cholesky(Rzz + alpha * alpha_scale * np.eye(dim))
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, _ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
@@ -583,9 +589,8 @@ if __name__ == "__main__":
 
     print("*** DONE ***")
 
-# TODO: implement a new example that uses multiprocessing for parallel aggregation
 # TODO: the main estimate function should have the option to pass in a list of system orders n
-# TODO: utility to run a 2nd pass to collect residual statistics ~ or at least evaluate specific batches
+# TODO: utilities to run post-procssing passes for residual statistics ~ or at least evaluate specific batches
 # TODO: QR based VARX solver option --> using a QR merging operation
 # TODO: Can I make this work with CUPY or NUMPY equally?
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
