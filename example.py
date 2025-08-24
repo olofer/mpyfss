@@ -315,7 +315,8 @@ def basic_siso_feedback_example():
     C = signal.StateSpace(*signal.tf2ss(num, den))
     Cdt = C.to_discrete(dt=dt, method="zoh")
 
-    NT: int = 1500
+    PERIOD: int = 500
+    NT: int = 5 * PERIOD
     Y = np.zeros(NT)
     U = np.zeros(NT)
     R = np.zeros(NT)
@@ -324,15 +325,19 @@ def basic_siso_feedback_example():
     xc = np.zeros((Cdt.A.shape[0],))
     for k in range(NT):
         yk = Gdt.C @ xg + 0.01 * np.random.randn(1)
-        kmod = k % 500
-        rk = 0.0 if kmod < 50 or kmod > 400 else (1.0 if kmod < 200 else -1.0)
+        kmod = k % PERIOD
+        rk = (
+            0.0
+            if kmod < (1 / 10) * PERIOD or kmod > 4 / 5 * PERIOD
+            else (1.0 if kmod < PERIOD * (2 / 5) else -1.0)
+        ) * (k <= 4 * PERIOD)
         errk = rk - yk
         uk = Cdt.C @ xc + Cdt.D @ errk
         uk = np.maximum(np.minimum(uk, 100.0), -100.0)
         # Store feedback-simulation I/O
         R[k] = rk
-        Y[k] = yk
-        U[k] = uk
+        Y[k] = yk[0]
+        U[k] = uk[0]
         # Evolve to next time-step
         xc = Cdt.A @ xc + Cdt.B @ errk
         xg = Gdt.A @ xg + Gdt.B @ uk
@@ -374,8 +379,8 @@ def basic_siso_feedback_example():
             "True (%i states)" % (Gdt.A.shape[0]),
             "Estimated (%i states)" % (sys["A"].shape[0]),
         ],
-        omega_a=0.001,
-        omega_b=np.pi - 0.001,
+        omega_a=0.002,
+        omega_b=np.pi - 0.002,
     )
 
     # Show step-responses for true and estimated system
