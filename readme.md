@@ -34,8 +34,9 @@ model = mpyfss.estimate(nbatch, get_my_batch, lag, order, dterm)
 See `example.py` for complete examples. The below demonstration also requires `matplotlib` and `scipy` in addition to `numpy`.
 
 ```
-python3 example.py
+python3 example.py # default is SISO open-loop
 python3 example.py --which mimo-open-loop
+python3 example.py --which siso-closed-loop
 ```
 
 ## References

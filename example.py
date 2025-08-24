@@ -14,11 +14,18 @@ import argparse
 import mpyfss
 
 
-def sigma_plot(npts: int = 512, system_list: list = None, system_label: list = None):
+def sigma_plot(
+    npts: int = 512,
+    system_list: list = None,
+    system_label: list = None,
+    omega_a: float = 0.01,
+    omega_b: float = np.pi,
+):
     """
     Create a sigma plot of one or more MIMO discrete-time LTI systems.
     """
-    w = np.logspace(-2, np.log10(np.pi), npts)  # correct base ?!
+    assert omega_a < omega_b
+    w = np.logspace(np.log10(omega_a), np.log10(omega_b), npts)  # correct base ?!
 
     colors = ["black", "blue", "red", "green"]
     if not system_label is None:
@@ -342,9 +349,66 @@ def basic_siso_feedback_example():
     plt.tight_layout()
     plt.show()
 
-    #
-    # WIP: call MPYFSS.ESTIMATE(.) --> check that I can identify the integrator in the loop?
-    #
+    # Direct estimate from I/O data collected from closed-loop operation
+    def get_single_batch(idx_: int):
+        assert idx_ == 0
+        return U.reshape((NT, 1)) / 100, Y.reshape((NT, 1))
+
+    sys = mpyfss.estimate(1, get_single_batch, 20, 2, False, transposed_batch=True)
+
+    print(sys.keys())
+    print(sys["sv"])
+
+    scale_correction = 100.0 / 1.0
+    sigma_plot(
+        system_list=[
+            {
+                "A": Gdt.A,
+                "B": scale_correction * Gdt.B,
+                "C": Gdt.C,
+                "D": scale_correction * Gdt.D,
+            },
+            sys,
+        ],
+        system_label=[
+            "True (%i states)" % (Gdt.A.shape[0]),
+            "Estimated (%i states)" % (sys["A"].shape[0]),
+        ],
+        omega_a=0.001,
+        omega_b=np.pi - 0.001,
+    )
+
+    # Show step-responses for true and estimated system
+    # This should simply be a quadratic function since the open-loop system is a plain double integrator.
+    t0, y0 = signal.dstep(Gdt, n=100)
+    y0 = np.squeeze(y0) * scale_correction
+    t1, y1 = signal.dstep(
+        signal.dlti(sys["A"], sys["B"], sys["C"], sys["D"], dt=dt), n=100
+    )
+    y1 = np.squeeze(y1)
+    assert np.all(t0 == t1)
+
+    plt.figure()
+    plt.plot(
+        t0,
+        y0,
+        linewidth=2,
+        label="step: true system (%i states)" % (Gdt.A.shape[0]),
+        alpha=0.67,
+    )
+    plt.plot(
+        t1,
+        y1,
+        linewidth=2,
+        label="step: estimated system (%i states)" % (sys["A"].shape[0]),
+        alpha=0.67,
+    )
+    plt.title("System step response")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Amplitude")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 
 if __name__ == "__main__":
