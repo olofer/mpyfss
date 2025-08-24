@@ -279,6 +279,74 @@ def basic_mimo_example(
     )
 
 
+def basic_siso_feedback_example():
+    """
+    Double-integrator with PD-like feedback (including nonlinear clipping).
+    "Direct" closed-loop system identification demonstration.
+    """
+
+    omega = 4.0
+    dt = 5e-3
+
+    num = [1]
+    den = [1, 0, 0]
+
+    # Gs = signal.TransferFunction(num, den)
+    # A, B, C, D = signal.tf2ss(num, den)
+    G = signal.StateSpace(*signal.tf2ss(num, den))
+    Gdt = G.to_discrete(dt=dt, method="zoh")
+    assert np.allclose(Gdt.D, 0.0)
+
+    print(Gdt)
+
+    Kp = 2 * omega * omega
+    Kd = 2 * omega
+    taud = 0.25 / omega
+    num = [Kp * taud + Kd, Kp]
+    den = [taud, 1]
+    # Cs = signal.TransferFunction(num, den)
+    C = signal.StateSpace(*signal.tf2ss(num, den))
+    Cdt = C.to_discrete(dt=dt, method="zoh")
+
+    NT: int = 1500
+    Y = np.zeros(NT)
+    U = np.zeros(NT)
+    R = np.zeros(NT)
+
+    xg = np.zeros((Gdt.A.shape[0],))
+    xc = np.zeros((Cdt.A.shape[0],))
+    for k in range(NT):
+        yk = Gdt.C @ xg + 0.01 * np.random.randn(1)
+        kmod = k % 500
+        rk = 0.0 if kmod < 50 or kmod > 400 else (1.0 if kmod < 200 else -1.0)
+        errk = rk - yk
+        uk = Cdt.C @ xc + Cdt.D @ errk
+        uk = np.maximum(np.minimum(uk, 100.0), -100.0)
+        # Store feedback-simulation I/O
+        R[k] = rk
+        Y[k] = yk
+        U[k] = uk
+        # Evolve to next time-step
+        xc = Cdt.A @ xc + Cdt.B @ errk
+        xg = Gdt.A @ xg + Gdt.B @ uk
+
+    # Visualize the time-series
+    T = dt * np.arange(NT)
+    plt.plot(T, R, label="r(t)")
+    plt.plot(T, Y, label="y(t)")
+    plt.plot(T, U / 100, label="u(t)/100")
+    plt.xlabel("time [sec]")
+    plt.ylabel("I/O signals")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    #
+    # WIP: call MPYFSS.ESTIMATE(.) --> check that I can identify the integrator in the loop?
+    #
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--which", type=str, default="siso-open-loop")
@@ -290,6 +358,8 @@ if __name__ == "__main__":
         basic_siso_example()
     elif args.which.lower() == "mimo-open-loop":
         basic_mimo_example()
+    elif args.which.lower() == "siso-closed-loop":
+        basic_siso_feedback_example()
     else:
         raise NotImplementedError
 
