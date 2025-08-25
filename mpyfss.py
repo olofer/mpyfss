@@ -376,11 +376,53 @@ def input_to_state_map_(A: np.ndarray, B: np.ndarray, p: int) -> np.ndarray:
     return Mpf
 
 
+def extract_system_(
+    T: np.ndarray, Ti: np.ndarray, package: dict, ny: int, nu: int
+) -> dict:
+    """
+    Helper routine that takes the SVD-derived panels T, Ti and the FIR-package and
+    carves out/extracts final state-space matrices (A,B,K,C,D) for the order n implied by the panels.
+    This might be called several times after a single SVD; to get many candidate systems.
+    """
+    n = T.shape[1]
+    assert Ti.shape[0] == n
+    assert package["C"].shape[0] == ny
+
+    # Transform & truncate predictor to n states
+    Ak = Ti @ np.vstack([T[ny:, :], np.zeros((ny, n))])
+    # Ak = Ti @ package["A"] @ T
+    Bk = Ti @ package["B"]
+    Ck = package["C"] @ T
+    Dk = package["D"]
+
+    K = Bk[:, nu:]
+    D = Dk[:, :nu]
+    C = Ck
+    B = Bk[:, :nu] + K @ Dk[:, :nu]
+    A = Ak + K @ Ck
+
+    assert K.shape == (n, ny)
+    assert D.shape == (ny, nu)
+    assert B.shape == (n, nu)
+    assert C.shape == (ny, n)
+    assert A.shape == (n, n)
+
+    """
+    rep.K = B(:, (nu+1):end);
+    rep.D = D(:, 1:nu) * (rmsy / rmsu);
+    rep.C = C;
+    rep.B = (B(:, 1:nu) + rep.K * D(:, 1:nu)) * (rmsy / rmsu);
+    rep.A = A + rep.K * rep.C;
+    """
+
+    return {"A": A, "B": B, "K": K, "C": C, "D": D}
+
+
 def estimate(
     batches: int,
     get_batch: callable,
     p: int,
-    n: int,
+    n: any,  # single integer, or a list of integers
     dterm: bool = False,
     transposed_batch: bool = False,
     reduction_method: str = "weighted",
@@ -389,14 +431,17 @@ def estimate(
     custom_accumulator: callable = None,
 ) -> dict:
     """
-    This integrates VARX estimation (lag-order p) with subsequent model reduction.
-    The final returned LTI state-space system {A,B,K,C,D,Q,R} has n states.
+    System identification of LTI state space models {A,B,K,C,D}. K is the steady-state Kalman gain.
+    The dimension of the final state-space can either be provided as a single integer n, or a list of integers.
+    This method integrates VARX estimation (lag-order p) with subsequent model reduction.
     The "reduction_method" parameter can be "weighted" (default) or "unweighted".
     Regularization parameter alpha applies to the "weighted" model reduction step.
     Regularization parameter beta applies to the VARX regression step.
+    Advanced usage allows specifying a custom covariance accumulator function.
     """
     assert batches >= 1, "Must provide at least 1 batch of data"
     assert alpha >= 0.0, "alpha >= 0 required"
+    assert isinstance(n, list) or isinstance(n, int)
 
     need_zz = reduction_method.lower() == "weighted"
 
@@ -435,8 +480,6 @@ def estimate(
         # Should be equivalent to balanced truncation of the mfir_ system
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, _ = np.linalg.svd(Mpy, full_matrices=False, compute_uv=True)
-        T = U_[:, :n] @ np.diag(S_[:n])
-        Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
 
     elif reduction_method.lower() == "weighted":
         dim = p * (ny + nu)
@@ -449,49 +492,39 @@ def estimate(
         La = np.linalg.cholesky(Rzz + alpha * alpha_scale * np.eye(dim))
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, _ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)
-        assert S_.shape == (ny * p,)
-        T = U_[:, :n] @ np.diag(S_[:n])
-        Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
 
     else:
         assert False, "Unrecognized reduction_method"
 
-    # Transform & truncate predictor to n states
-    Ak = Ti @ np.vstack([T[ny:, :], np.zeros((ny, n))])
-    # Ak = Ti @ system_package["A"] @ T
-    Bk = Ti @ system_package["B"]
-    Ck = system_package["C"] @ T
-    Dk = system_package["D"]
+    assert S_.shape == (ny * p,)
 
-    K = Bk[:, nu:]
-    D = Dk[:, :nu]
-    C = Ck
-    B = Bk[:, :nu] + K @ Dk[:, :nu]
-    A = Ak + K @ Ck
+    if isinstance(n, list):
+        system = list()
+        for order in n:
+            assert isinstance(order, int)
+            assert order <= p * ny
+            T = U_[:, :order] @ np.diag(S_[:order])
+            Ti = np.diag(1.0 / S_[:order]) @ U_[:, :order].T
+            system.append(extract_system_(T, Ti, system_package, ny, nu))
 
-    assert K.shape == (n, ny)
-    assert D.shape == (ny, nu)
-    assert B.shape == (n, nu)
-    assert C.shape == (ny, n)
-    assert A.shape == (n, n)
+    else:
+        assert n <= p * ny
+        T = U_[:, :n] @ np.diag(S_[:n])
+        Ti = np.diag(1.0 / S_[:n]) @ U_[:, :n].T
+        system = extract_system_(T, Ti, system_package, ny, nu)
 
-    """
-    rep.K = B(:, (nu+1):end);
-    rep.D = D(:, 1:nu) * (rmsy / rmsu);
-    rep.C = C;
-    rep.B = (B(:, 1:nu) + rep.K * D(:, 1:nu)) * (rmsy / rmsu);
-    rep.A = A + rep.K * rep.C;
-    """
+    def single_or_list_of(sys_, item_):
+        return sys_[item_] if isinstance(sys_, dict) else [s_[item_] for s_ in sys_]
 
     return {
         "mvarx": markov_coefs,
         "mfir": system_package,
         "sv": S_,
-        "A": A,
-        "B": B,
-        "K": K,
-        "C": C,
-        "D": D,
+        "A": single_or_list_of(system, "A"),
+        "B": single_or_list_of(system, "B"),
+        "K": single_or_list_of(system, "K"),
+        "C": single_or_list_of(system, "C"),
+        "D": single_or_list_of(system, "D"),
     }
 
 
@@ -572,6 +605,12 @@ if __name__ == "__main__":
 
     assert np.sum(sys_0["D"] ** 2) == 0
 
+    sys_0_multiple = estimate(args.B, GET_BATCH, args.p, [args.n, args.n], dterm=False)
+    assert len(sys_0_multiple["A"]) == 2
+    for k in range(len(sys_0_multiple["A"])):
+        for m in ["A", "B", "K", "C", "D"]:
+            assert np.all(sys_0[m] == sys_0_multiple[m][k])
+
     # Check the transposed batch option
     def GET_TRANSPOSED_BATCH(index: int):
         return DATA[index][0].T, DATA[index][1].T
@@ -583,14 +622,13 @@ if __name__ == "__main__":
         args.B, GET_TRANSPOSED_BATCH, args.p, args.n, dterm=True, transposed_batch=True
     )
 
-    for m in ["A", "B", "C", "D"]:
-        assert np.allclose(sys_0[m], sys_0_t[m])
-        assert np.allclose(sys_1[m], sys_1_t[m])
+    for m in ["A", "B", "K", "C", "D"]:
+        assert np.all(sys_0[m] == sys_0_t[m])
+        assert np.all(sys_1[m] == sys_1_t[m])
 
     print("*** DONE ***")
 
-# TODO: the main estimate function should have the option to pass in a list of system orders n
-# TODO: utilities to run post-procssing passes for residual statistics ~ or at least evaluate specific batches
+# TODO: utilities to run post-processing passes for residual statistics ~ or at least evaluate specific batches
 # TODO: QR based VARX solver option --> using a QR merging operation
 # TODO: Can I make this work with CUPY or NUMPY equally?
 # TODO: option to split up the regressor assembly within-batch with blocking (might be needed for scale)
