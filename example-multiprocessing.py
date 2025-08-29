@@ -73,7 +73,7 @@ def custom_accumulator_function(
     """
     Custum accumulator that can be made acceptable for MPYFSS.ESTIMATE(.)
     """
-    summary = {"ZZ": None, "YZ": None, "N": int(0)}
+    summary = {"ZZ": None, "YZ": None, "YY": None, "N": int(0)}
 
     job_list = [
         k for k in range(num_batches)
