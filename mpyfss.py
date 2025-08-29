@@ -137,22 +137,26 @@ def get_stats(batches: int, get_batch: callable) -> dict:
     }
 
 
-def merge_covariance_(acc: dict, block: tuple):
+def merge_covariance_(
+    acc: dict, ZZ: np.ndarray, YZ: np.ndarray, YY: np.ndarray, N: int
+):
     """
-    Each "block" argument is a tuple (ZZ, YZ, nsamples).
     Modifies the elements of "acc" in-place, unless it is the initial assignment.
     """
     if acc["N"] == 0:
-        acc["ZZ"] = np.copy(block[0])
-        acc["YZ"] = np.copy(block[1])
-        acc["N"] = block[2]
+        acc["ZZ"] = np.copy(ZZ)
+        acc["YZ"] = np.copy(YZ)
+        acc["YY"] = np.copy(YY)
+        acc["N"] = N
     else:
-        n1, n2 = acc["N"], block[2]
+        n1, n2 = acc["N"], N
         a_, b_ = n1 / (n1 + n2), n2 / (n1 + n2)
         acc["ZZ"] *= a_
-        acc["ZZ"] += b_ * block[0]
+        acc["ZZ"] += b_ * ZZ
         acc["YZ"] *= a_
-        acc["YZ"] += b_ * block[1]
+        acc["YZ"] += b_ * YZ
+        acc["YY"] *= a_
+        acc["YY"] += b_ * YY
         acc["N"] += n2
 
 
@@ -166,7 +170,7 @@ def default_sequential_accumulator_(
     sclu: float = 1.0,
     verbose: bool = False,
 ):
-    STATS = {"ZZ": None, "YZ": None, "N": int(0)}
+    STATS = {"ZZ": None, "YZ": None, "YY": None, "N": int(0)}
 
     for b in range(batches):
         u, y = get_batch(b)
@@ -179,7 +183,9 @@ def default_sequential_accumulator_(
                 dterm=dterm,
             )
             Nb = Yb.shape[0]
-            merge_covariance_(STATS, ((Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, Nb))
+            merge_covariance_(
+                STATS, (Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, (Yb.T @ Yb) / Nb, Nb
+            )
         else:
             Yb, Zb = dvarxdata_(
                 y if scly == 1.0 else scly * y,
@@ -188,12 +194,14 @@ def default_sequential_accumulator_(
                 dterm=dterm,
             )
             Nb = Yb.shape[1]
-            merge_covariance_(STATS, ((Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, Nb))
+            merge_covariance_(
+                STATS, (Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, (Yb @ Yb.T) / Nb, Nb
+            )
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
 
-    return STATS["ZZ"], STATS["YZ"], STATS["N"]
+    return STATS["ZZ"], STATS["YZ"], STATS["YY"], STATS["N"]
 
 
 def mvarx_(
@@ -206,6 +214,8 @@ def mvarx_(
     sclu: float = 1.0,
     verbose: bool = False,
     beta: float = 0.0,
+    return_ee: bool = True,
+    return_yy: bool = True,
     return_yz: bool = True,
     return_zz: bool = True,
     custom_accumulator: callable = None,
@@ -217,7 +227,7 @@ def mvarx_(
     assert batches >= 1, "Must provide at least 1 batch of data"
 
     if custom_accumulator is None:
-        ZZ, YZ, Ntot = default_sequential_accumulator_(
+        ZZ, YZ, YY, Ntot = default_sequential_accumulator_(
             batches,
             get_batch,
             p,
@@ -240,19 +250,31 @@ def mvarx_(
             "sclu": sclu,
             "verbose": verbose,
         }
-        ZZ, YZ, Ntot = custom_accumulator(batches, custom_args)
+        ZZ, YZ, YY, Ntot = custom_accumulator(batches, custom_args)
 
     if verbose:
         print("Total regressors:", Ntot)
-        print("YZ:", YZ.shape, "ZZ:", ZZ.shape)
+        print("YY:", YY.shape, "YZ:", YZ.shape, "ZZ:", ZZ.shape)
+
+    beta_scale = np.trace(ZZ) / ZZ.shape[0]
+    if beta_scale == 0.0:
+        beta_scale = 1.0
+        print("WARNING: beta-scale = 0")
 
     # Estimate the Markov parameters as H = YZ * inv(ZZ).
     # Solve H * ZZ = YZ --> ZZ.T * H.T = YZ.T
     if beta > 0.0:
         # Optional basic Tikhonov regularization
-        Ht = np.linalg.solve(ZZ.T + beta * np.eye(ZZ.shape[0]), YZ.T)
+        Ht = np.linalg.solve(ZZ.T + beta * beta_scale * np.eye(ZZ.shape[0]), YZ.T)
     else:
         Ht = np.linalg.solve(ZZ.T, YZ.T)
+
+    # Evaluate the error EE:
+    EE = YY - Ht.T @ YZ.T - YZ @ Ht + (Ht.T @ ZZ) @ Ht
+
+    # Extract root-mean-square error and signal levels
+    rmse = np.sqrt(np.diag(EE))
+    rmsy = np.sqrt(np.diag(YY))
 
     return {
         "H": Ht.T,
@@ -262,6 +284,10 @@ def mvarx_(
         "p": p,
         "Ntot": Ntot,
         "beta": beta,
+        "rmse": rmse,  # ratio rmse / rmsy is useful to look at
+        "rmsy": rmsy,
+        "EE": EE if return_ee else None,
+        "YY": YY if return_yy else None,
         "YZ": YZ if return_yz else None,
         "ZZ": ZZ if return_zz else None,
     }
@@ -488,7 +514,7 @@ def estimate(
         alpha_scale = np.trace(Rzz) / dim
         if alpha_scale == 0.0:
             alpha_scale = 1.0
-            print("WARNING: all-zero data?")
+            print("WARNING: alpha-scale = 0")
         La = np.linalg.cholesky(Rzz + alpha * alpha_scale * np.eye(dim))
         Mpy = input_to_state_map_(None, system_package["B"], p)
         U_, S_, _ = np.linalg.svd(Mpy @ La, full_matrices=False, compute_uv=True)

@@ -36,7 +36,12 @@ def get_batch_covariance(idx: int, params: dict):
     assert params["transposed"], "standard argument inconsistent with batch producer"
     Yi, Zi = mpyfss.dvarxdata_transposed_(Y, U, params["p"], params["dterm"])
     Ni = Yi.shape[0]
-    return {"ZZ": (Zi.T @ Zi) / Ni, "YZ": (Yi.T @ Zi) / Ni, "N": Ni}
+    return {
+        "ZZ": (Zi.T @ Zi) / Ni,
+        "YZ": (Yi.T @ Zi) / Ni,
+        "YY": (Yi.T @ Yi) / Ni,
+        "N": Ni,
+    }
 
 
 def merge_result(summary: dict, item: dict):
@@ -51,11 +56,14 @@ def merge_result(summary: dict, item: dict):
         summary["ZZ"] += b_ * item["ZZ"]
         summary["YZ"] *= a_
         summary["YZ"] += b_ * item["YZ"]
+        summary["YY"] *= a_
+        summary["YY"] += b_ * item["YY"]
         summary["N"] += item["N"]
     else:
         # print("1st!")
         summary["ZZ"] = item["ZZ"]
         summary["YZ"] = item["YZ"]
+        summary["YY"] = item["YY"]
         summary["N"] = item["N"]
 
 
@@ -79,7 +87,7 @@ def custom_accumulator_function(
             merge_result(summary, item)
             print(k, item["N"])
 
-    return summary["ZZ"], summary["YZ"], summary["N"]
+    return summary["ZZ"], summary["YZ"], summary["YY"], summary["N"]
 
 
 if __name__ == "__main__":
@@ -91,18 +99,9 @@ if __name__ == "__main__":
     parser.add_argument("--chunksize", type=int, default=10)
     args = parser.parse_args()
 
-    # standard_params = {"p": 10, "dterm": False}
-
     shippable_custom_accumulator = functools.partial(
         custom_accumulator_function, workers=args.workers, chunksize=args.chunksize
     )
-
-    # ZZ, YZ, N = custom_accumulator_function(args.batches, standard_params, args.workers, args.chunksize)
-    # ZZ, YZ, N = shippable_custom_accumulator(args.batches, standard_params)
-    # print(ZZ.shape, YZ.shape)
-    # print("total N:", N)
-    # assert np.all(np.isfinite(ZZ))
-    # assert np.all(np.isfinite(YZ))
 
     SYS = mpyfss.estimate(
         args.batches,
