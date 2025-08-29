@@ -1,6 +1,6 @@
 # mpyfss
 
-Linear time-invariant (LTI) system identification of multiple-input multiple-output (MIMO) systems. Uses vector auto-regression (VARX) combined with model reduction. The signal data can be provided in multiple batches. 
+Linear time-invariant (LTI) system identification of multiple-input multiple-output (MIMO) systems. Uses vector auto-regression (VARX) combined with weighted model reduction. The signal data can be provided in multiple batches. 
 
 This `mpyfss` repository contains reworked ***selected pieces*** from the `mpfss` repository (https://github.com/olofer/mpfss) which is strictly `matlab`/`octave` and therefore less accessible in many use-cases.  
 
@@ -38,6 +38,16 @@ python3 example.py # default is SISO open-loop
 python3 example.py --which mimo-open-loop
 python3 example.py --which siso-closed-loop
 ```
+
+## Custom accumulator usage
+
+For large datasets it can be helpful to use `multiprocessing` to load (or generate) and calculate batch covariances in parallel. 
+
+```
+python3 example-multiprocessing.py
+```
+
+See source code for details.
 
 ## References
 
