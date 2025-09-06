@@ -554,6 +554,38 @@ def estimate(
     }
 
 
+def unscale_system_(
+    A: np.ndarray,
+    B: np.ndarray,
+    K: np.ndarray,
+    C: np.ndarray,
+    D: np.ndarray,
+    Su: any,
+    Sy: any,
+):
+    """
+    Assuming that the system matrices (A,B,K,C,D) were estimated for the scaled I/O data (Su*u, Sy*y),
+    undo the scaling so that the returned system matrices are associated with the original I/O data (u,y).
+    Su, Sy can be scalars or vectors (in which case they correspond to diagonal scalings).
+    """
+    nu, ny = B.shape[1], C.shape[0]
+
+    if isinstance(Su, float):
+        Su = np.ones((nu,)) * Su
+
+    if isinstance(Sy, float):
+        Sy = np.ones((ny,)) * Sy
+
+    assert len(Su) == nu
+    assert len(Sy) == ny
+
+    SU = np.diag(Su)
+    SY = np.diag(Sy)
+    iSY = np.diag(1.0 / Sy)
+
+    return np.copy(A), B @ SU, K @ SY, iSY @ C, iSY @ D @ SU
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -647,10 +679,14 @@ if __name__ == "__main__":
     sys_1_t = estimate(
         args.B, GET_TRANSPOSED_BATCH, args.p, args.n, dterm=True, transposed_batch=True
     )
+    sys_0_u = unscale_system_(
+        sys_0["A"], sys_0["B"], sys_0["K"], sys_0["C"], sys_0["D"], 1.0, 1.0
+    )
 
-    for m in ["A", "B", "K", "C", "D"]:
+    for i, m in enumerate(["A", "B", "K", "C", "D"]):
         assert np.all(sys_0[m] == sys_0_t[m])
         assert np.all(sys_1[m] == sys_1_t[m])
+        assert np.all(sys_0[m] == sys_0_u[i])
 
     print("*** DONE ***")
 
