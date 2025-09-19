@@ -10,7 +10,14 @@ USAGE: just import this file & call mpyfss.estimate(.)
 import numpy as np
 
 
-def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
+def dvarxdata_(
+    y: np.ndarray,
+    u: np.ndarray,
+    p: int,
+    dterm: bool = False,
+    kmin: int = None,
+    kmax: int = None,
+):
     """
     Create regressor for one contiguous batch of time-series I/O data.
     It is assumed that the time-dimension is across columns (rows are signal channels).
@@ -18,8 +25,8 @@ def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
     ny, N = y.shape
     nu = u.shape[0]
     assert u.shape[1] == N
-    k1 = p
-    k2 = N
+    k1 = p if kmin is None else kmin
+    k2 = N if kmax is None else kmax
     Neff = k2 - k1
     assert Neff >= 1, "Lag too large for batch time-series length"
     nz = ny + nu
@@ -51,7 +58,14 @@ def dvarxdata_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
     return Y, Zp
 
 
-def dvarxdata_transposed_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = False):
+def dvarxdata_transposed_(
+    y: np.ndarray,
+    u: np.ndarray,
+    p: int,
+    dterm: bool = False,
+    kmin: int = None,
+    kmax: int = None,
+):
     """
     Create regressor for one contiguous batch of time-series I/O data.
     It is assumed that the time-dimension is across rows (columns are signal channels).
@@ -59,8 +73,8 @@ def dvarxdata_transposed_(y: np.ndarray, u: np.ndarray, p: int, dterm: bool = Fa
     N, ny = y.shape
     nu = u.shape[1]
     assert u.shape[0] == N
-    k1 = p
-    k2 = N
+    k1 = p if kmin is None else kmin
+    k2 = N if kmax is None else kmax
     Neff = k2 - k1
     assert Neff >= 1, "Lag too large for batch time-series length"
     nz = ny + nu
