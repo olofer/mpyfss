@@ -180,8 +180,6 @@ def default_sequential_accumulator_(
     p: int,
     dterm: bool = False,
     transposed_batch: bool = False,
-    scly: float = 1.0,
-    sclu: float = 1.0,
     verbose: bool = False,
 ):
     STATS = {"ZZ": None, "YZ": None, "YY": None, "N": int(0)}
@@ -191,26 +189,26 @@ def default_sequential_accumulator_(
 
         if transposed_batch:
             Yb, Zb = dvarxdata_transposed_(
-                y if scly == 1.0 else scly * y,
-                u if sclu == 1.0 else sclu * u,
+                y,
+                u,
                 p,
                 dterm=dterm,
             )
             Nb = Yb.shape[0]
-            merge_covariance_(
-                STATS, (Zb.T @ Zb) / Nb, (Yb.T @ Zb) / Nb, (Yb.T @ Yb) / Nb, Nb
-            )
+            Yb *= 1.0 / np.sqrt(Nb)
+            Zb *= 1.0 / np.sqrt(Nb)
+            merge_covariance_(STATS, Zb.T @ Zb, Yb.T @ Zb, Yb.T @ Yb, Nb)
         else:
             Yb, Zb = dvarxdata_(
-                y if scly == 1.0 else scly * y,
-                u if sclu == 1.0 else sclu * u,
+                y,
+                u,
                 p,
                 dterm=dterm,
             )
             Nb = Yb.shape[1]
-            merge_covariance_(
-                STATS, (Zb @ Zb.T) / Nb, (Yb @ Zb.T) / Nb, (Yb @ Yb.T) / Nb, Nb
-            )
+            Yb *= 1.0 / np.sqrt(Nb)
+            Zb *= 1.0 / np.sqrt(Nb)
+            merge_covariance_(STATS, Zb @ Zb.T, Yb @ Zb.T, Yb @ Yb.T, Nb)
 
         if verbose:
             print("shapes:", b, Yb.shape, Zb.shape)
@@ -224,8 +222,6 @@ def mvarx_(
     p: int,
     dterm: bool = False,
     transposed_batch: bool = False,
-    scly: float = 1.0,
-    sclu: float = 1.0,
     verbose: bool = False,
     beta: float = 0.0,
     return_ee: bool = True,
@@ -247,8 +243,6 @@ def mvarx_(
             p,
             dterm=dterm,
             transposed_batch=transposed_batch,
-            scly=scly,
-            sclu=sclu,
             verbose=verbose,
         )
     else:
@@ -260,8 +254,6 @@ def mvarx_(
             "p": p,
             "dterm": dterm,
             "transposed": transposed_batch,
-            "scly": scly,
-            "sclu": sclu,
             "verbose": verbose,
         }
         ZZ, YZ, YY, Ntot = custom_accumulator(batches, custom_args)
@@ -292,8 +284,6 @@ def mvarx_(
 
     return {
         "H": Ht.T,
-        "scly": scly,
-        "sclu": sclu,
         "dterm": dterm,
         "p": p,
         "Ntot": Ntot,
