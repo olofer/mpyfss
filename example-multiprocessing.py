@@ -36,10 +36,12 @@ def get_batch_covariance(idx: int, params: dict):
     assert params["transposed"], "standard argument inconsistent with batch producer"
     Yi, Zi = mpyfss.dvarxdata_transposed_(Y, U, params["p"], params["dterm"])
     Ni = Yi.shape[0]
+    Yi *= 1.0 / np.sqrt(Ni)
+    Zi *= 1.0 / np.sqrt(Ni)
     return {
-        "ZZ": (Zi.T @ Zi) / Ni,
-        "YZ": (Yi.T @ Zi) / Ni,
-        "YY": (Yi.T @ Yi) / Ni,
+        "ZZ": Zi.T @ Zi,
+        "YZ": Yi.T @ Zi,
+        "YY": Yi.T @ Yi,
         "N": Ni,
     }
 
